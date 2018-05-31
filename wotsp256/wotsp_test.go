@@ -3,7 +3,7 @@ package wotsp256
 import (
 	"testing"
 	"crypto/rand"
-	"github.com/Re0h/wotsp256/testdata"
+	"github.com/Re0h/xnyss/wotsp256/testdata"
 )
 
 func TestAll(t *testing.T) {
@@ -25,32 +25,35 @@ func TestAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pubKey := GenPublicKey(seed, pubSeed, Address{})
-	signed := Sign(msg, seed, pubSeed, Address{})
+	pubKey := GenPublicKey(seed, pubSeed, &Address{})
+	signed := Sign(msg, seed, pubSeed, &Address{})
 
-	t.Log("Sig len", len(signed))
-	t.Log("Pk  len", len(pubKey))
-
-	if !Verify(pubKey, signed, msg, pubSeed, Address{}) {
+	if !Verify(pubKey, signed, msg, pubSeed, &Address{}) {
 		t.Fail()
 	}
 }
 
 func BenchmarkGenPublicKey(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = GenPublicKey(testdata.Seed, testdata.PubSeed, Address{})
+		_ = GenPublicKey(testdata.Seed, testdata.PubSeed, &Address{})
 	}
 }
 
 func BenchmarkSign(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = Sign(testdata.Message, testdata.Seed, testdata.PubSeed, Address{})
+		_ = Sign(testdata.Message, testdata.Seed, testdata.PubSeed, &Address{})
 	}
 }
 
 func BenchmarkPkFromSig(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, Address{})
+		_ = PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, &Address{})
 	}
 }
 

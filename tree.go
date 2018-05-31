@@ -2,41 +2,45 @@
 package xnyss
 
 import (
+	wotsp "github.com/Re0h/xnyss/wotsp256"
 	"errors"
-	"github.com/Re0h/wotscoin/gocoin/lib/xnyss/wotsp256"
 	"bytes"
+	"crypto/sha256"
 )
 
 const (
-	MsgLen = 32
-	SigLen = wotsp256.SigLen
-	PubKeyLen = wotsp256.PubKeyLen
+	MsgLen    = 32
+	SigLen    = wotsp.SigLen
+	PubKeyLen = wotsp.PubKeyLen
 )
 
 // Denotes the amount of confirmations (or block depth) that are required before
 // a node can be used to create new signatures.
-var ConfirmsRequired uint8 = 6
+var ConfirmsRequired uint8 = 1
+
+// Denotes the branching factor when using long-term keys
+var Branches = 3
 
 var (
-	ErrInvalidMsgLen     = errors.New("invalid message length (must be 32 bytes)")
-	ErrTreeInvalidInput  = errors.New("invalid input, must contain at least a private and a public seed")
-	ErrTreeNoneAvailable = errors.New("no signature nodes available")
+	ErrInvalidMsgLen       = errors.New("invalid message length (must be 32 bytes)")
+	ErrTreeInvalidInput    = errors.New("invalid input, must contain at least a private and a public seed")
+	ErrTreeNoneAvailable   = errors.New("no signature nodes available")
 )
 
 type NYTree struct {
 	nodes       []*nyNode
 	rootSeed    []byte
 	rootPubSeed []byte
+	ots         bool
 	// TODO make thread safe by using a mutex
 }
 
 // Creates a new Naor-Yung chain tree using the given secret and public seeds.
-func New(seed, pubSeed []byte) *NYTree {
+func New(seed, pubSeed []byte, ots bool) *NYTree {
 	root := &nyNode{
 		privSeed: make([]byte, 32),
 		pubSeed:  make([]byte, 32),
 		txid:     make([]byte, 32),
-		input:    0,
 		confirms: ConfirmsRequired, // We can use the root node immediately
 	}
 
@@ -53,13 +57,14 @@ func New(seed, pubSeed []byte) *NYTree {
 	copy(tree.rootPubSeed, pubSeed)
 
 	tree.nodes = append(tree.nodes, root)
+	tree.ots = ots
 
 	return tree
 }
 
 // Returns the long-term public key of a tree.
 func (t *NYTree) PublicKey() []byte {
-	return wotsp256.GenPublicKey(t.rootSeed, t.rootPubSeed, wotsp256.Address{})
+	return wotsp.GenPublicKey(t.rootSeed, t.rootPubSeed, &wotsp.Address{})
 }
 
 // Searches for a node in the tree that can be used to create a new signature.
@@ -98,7 +103,7 @@ func (t *NYTree) getSignNode(txid []byte) int {
 // signature signs the message H(msg||H(pk1)||H(pk2)) where msg is the original
 // message passed to this function. Both H(pk1) and H(pk2) are included in the
 // returned signature structure.
-func (t *NYTree) Sign(msg, txid []byte, input uint8) (*Signature, error) {
+func (t *NYTree) Sign(msg, txid []byte) (*Signature, error) {
 	if len(msg) > MsgLen {
 		return nil, ErrInvalidMsgLen
 	}
@@ -109,39 +114,42 @@ func (t *NYTree) Sign(msg, txid []byte, input uint8) (*Signature, error) {
 	}
 
 	// Create a signature, retrieving the next nodes to add to the tree
-	sig, leftChild, rightChild, err := t.nodes[index].sign(msg, txid, input)
+	sig, childNodes, err := t.nodes[index].sign(msg, txid, t.ots)
 	if err != nil {
 		return nil, err
 	}
 
-	// Remove used node from the tree, and add child nodes to the tree
+	// Remove used node from the tree
 	t.nodes = append(t.nodes[:index], t.nodes[index+1:]...)
-	t.nodes = append(t.nodes, leftChild, rightChild)
+
+	// Add child nodes to the tree
+	if !t.ots && childNodes != nil {
+		for i := range childNodes {
+			t.nodes = append(t.nodes, childNodes[i])
+		}
+	}
 
 	return sig, nil
 }
 
-// Returns a list of unconfirmed txids present in the tree.
+// Returns a list of public key hashes of unconfirmed nodes present in the tree.
 // TODO make thread safe
-func (t *NYTree) Unconfirmed() (txids [][]byte) {
-	for _, node := range t.nodes {
+func (t *NYTree) Unconfirmed() (pkhashes [][]byte) {
+	idxs := make([]int, 0, len(t.nodes))
+	for idx, node := range t.nodes {
 		if node.confirms >= ConfirmsRequired {
 			continue
 		}
 
-		present := false
-		for _, txid := range txids {
-			if bytes.Equal(node.txid, txid) {
-				present = true
-				break
-			}
-		}
+		idxs = append(idxs, idx)
+	}
 
-		if !present {
-			newTxid := make([]byte, 32)
-			copy(newTxid, node.txid)
-			txids = append(txids, newTxid)
-		}
+	pkhashes = make([][]byte, len(idxs))
+	for i, idx := range idxs {
+		pkh := sha256.Sum256(t.nodes[idx].genPubKey())
+
+		pkhashes[i] = make([]byte, 32)
+		copy(pkhashes[i], pkh[:])
 	}
 
 	return
@@ -149,10 +157,26 @@ func (t *NYTree) Unconfirmed() (txids [][]byte) {
 
 // Sets the confirmation count of all nodes in the tree with the given txid to
 // the given number of confirmations.
+//
+// Because we have to calculate the public key hash for every node on the fly,
+// this function can be a performance hog if you need to confirm many nodes. We
+// can speed this up by saving the public key hash of every (unconfirmed) node,
+// which would increase the size of every node with 32 bytes. Depending on the
+// amount of (unconfirmed) nodes that are in the state, this could be an
+// acceptable tradeoff. An ameliorating factor is that when we are confirming a
+// batch of nodes, the performance of this function will improve after every
+// call since each time an additional node will be confirmed.
+//
+// TODO test whether confirming many nodes has reasonable performance
 // TODO make thread safe
-func (t *NYTree) Confirm(txid []byte, confirms uint8) {
+func (t *NYTree) Confirm(pkh []byte, confirms uint8) {
 	for _, node := range t.nodes {
-		if bytes.Equal(node.txid, txid) {
+		if node.confirms >= ConfirmsRequired {
+			continue
+		}
+
+		nodePkh := sha256.Sum256(node.genPubKey())
+		if bytes.Equal(pkh, nodePkh[:]) {
 			node.confirms = confirms
 		}
 	}
@@ -173,7 +197,7 @@ func (t *NYTree) Available(txid []byte) (n int) {
 	return
 }
 
-// Wipes secret data. Ignores any errors that occur when validating nodes.
+// Wipes secret data.
 // TODO make thread safe
 func (t *NYTree) Wipe() {
 	for _, node := range t.nodes {
@@ -189,6 +213,13 @@ func (t *NYTree) Wipe() {
 // TODO make thread safe
 func (t *NYTree) Bytes() []byte {
 	buf := &bytes.Buffer{}
+
+	if t.ots {
+		buf.WriteByte(0x01)
+	} else {
+		buf.WriteByte(0x00)
+	}
+
 	buf.Write(t.rootSeed)
 	buf.Write(t.rootPubSeed)
 
@@ -201,20 +232,21 @@ func (t *NYTree) Bytes() []byte {
 
 // Loads an existing Naor-Yung chain tree.
 func Load(b []byte) (*NYTree, error) {
-	if len(b) < 64 {
+	if len(b) < 65 {
 		return nil, ErrTreeInvalidInput
 	}
 
 	tree := &NYTree{
-		nodes:       make([]*nyNode, 0, (len(b) - 64)/nodeByteLen),
+		nodes:       make([]*nyNode, 0, (len(b)-65)/nodeByteLen),
 		rootSeed:    make([]byte, 32),
 		rootPubSeed: make([]byte, 32),
 	}
 
-	copy(tree.rootSeed, b[:32])
-	copy(tree.rootPubSeed, b[32:64])
+	tree.ots = b[0] == 0x01
+	copy(tree.rootSeed, b[1:33])
+	copy(tree.rootPubSeed, b[33:65])
 
-	for offset := 64; offset < len(b); {
+	for offset := 65; offset < len(b); {
 		node, bytesRead, err := loadNode(b[offset:])
 		if err != nil {
 			return nil, err

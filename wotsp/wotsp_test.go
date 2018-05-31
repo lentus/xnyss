@@ -1,10 +1,10 @@
 package wotsp
 
 import (
-	"github.com/Re0h/wotscoin/gocoin/lib/nytree-adrs/wotsp/testdata"
-	"crypto/rand"
 	"testing"
 	"bytes"
+	"github.com/Re0h/xnyss/wotsp/testdata"
+	"crypto/rand"
 )
 
 func TestAddressToBytes(t *testing.T) {
@@ -34,7 +34,7 @@ func TestAddressToBytes(t *testing.T) {
 }
 
 func TestGenPublicKey(t *testing.T) {
-	pubKey := GenPublicKey(testdata.Seed, testdata.PubSeed, Address{})
+	pubKey := GenPublicKey(testdata.Seed, testdata.PubSeed, &Address{})
 
 	if !bytes.Equal(pubKey, testdata.PubKey) {
 		t.Error("Wrong key")
@@ -42,7 +42,7 @@ func TestGenPublicKey(t *testing.T) {
 }
 
 func TestSign(t *testing.T) {
-	signature := Sign(testdata.Message, testdata.Seed, testdata.PubSeed, Address{})
+	signature := Sign(testdata.Message, testdata.Seed, testdata.PubSeed, &Address{})
 
 	if !bytes.Equal(signature, testdata.Signature) {
 		t.Error("Wrong signature")
@@ -50,7 +50,7 @@ func TestSign(t *testing.T) {
 }
 
 func TestPkFromSig(t *testing.T) {
-	pubKey := PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, Address{})
+	pubKey := PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, &Address{})
 
 	if !bytes.Equal(pubKey, testdata.PubKey) {
 		t.Error("Wrong public key")
@@ -58,7 +58,7 @@ func TestPkFromSig(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
-	if !Verify(testdata.PubKey, testdata.Signature, testdata.Message, testdata.PubSeed, Address{}) {
+	if !Verify(testdata.PubKey, testdata.Signature, testdata.Message, testdata.PubSeed, &Address{}) {
 		t.Error("Wrong public key")
 	}
 }
@@ -82,29 +82,34 @@ func TestAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pubKey := GenPublicKey(seed, pubSeed, Address{})
-	signed := Sign(msg, seed, pubSeed, Address{})
+	pubKey := GenPublicKey(seed, pubSeed, &Address{})
+	signed := Sign(msg, seed, pubSeed, &Address{})
 
-	if !Verify(pubKey, signed, msg, pubSeed, Address{}) {
+	if !Verify(pubKey, signed, msg, pubSeed, &Address{}) {
 		t.Fail()
 	}
 }
 
 func BenchmarkGenPublicKey(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = GenPublicKey(testdata.Seed, testdata.PubSeed, Address{})
+		_ = GenPublicKey(testdata.Seed, testdata.PubSeed, &Address{})
 	}
 }
 
 func BenchmarkSign(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = Sign(testdata.Message, testdata.Seed, testdata.PubSeed, Address{})
+		_ = Sign(testdata.Message, testdata.Seed, testdata.PubSeed, &Address{})
 	}
 }
 
 func BenchmarkPkFromSig(b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
-		_ = PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, Address{})
+		_ = PkFromSig(testdata.Signature, testdata.Message, testdata.PubSeed, &Address{})
 	}
 }
-

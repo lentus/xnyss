@@ -36,22 +36,6 @@ func (a *Address) setKeyAndMask(km uint32) {
 	binary.BigEndian.PutUint32(a.data[28:], km)
 }
 
-func (a *Address) Layer() uint32 {
-	return binary.BigEndian.Uint32(a.data[0:])
-}
-
-func (a *Address) Tree() uint64 {
-	return binary.BigEndian.Uint64(a.data[4:])
-}
-
-func (a *Address) Type() uint32 {
-	return binary.BigEndian.Uint32(a.data[12:])
-}
-
-func (a *Address) OTS() uint32 {
-	return binary.BigEndian.Uint32(a.data[16:])
-}
-
 func (a *Address) ToBytes() []byte {
 	return a.data[:]
 }

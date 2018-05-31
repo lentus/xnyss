@@ -55,3 +55,4 @@ func (a *Address) OTS() uint32 {
 func (a *Address) ToBytes() []byte {
 	return a.data[:]
 }
+

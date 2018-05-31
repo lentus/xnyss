@@ -1,7 +1,7 @@
 package xnyss
 
 import (
-	"github.com/Re0h/wotscoin/gocoin/lib/xnyss/wotsp256"
+	wotsp "github.com/Re0h/xnyss/wotsp256"
 	"crypto/sha256"
 	"errors"
 	"bytes"
@@ -15,35 +15,35 @@ var (
 type Signature struct {
 	PubSeed     []byte
 	Message     []byte
-	LeftHash    []byte
-	RightHash   []byte
-	ParentTxid  []byte
-	ParentInput uint8
+	ChildHashes [][]byte
 	SigBytes    []byte
 }
 
 func NewSignature(sigBytes, msg []byte) (sig *Signature, err error) {
-	if len(sigBytes) < wotsp256.SigLen+32+32+1+32+32 {
+	if len(sigBytes) < wotsp.SigLen+32 || (len(sigBytes) - (wotsp.SigLen+32)) % 32 != 0 {
 		err = ErrInvalidSigEncoding
 		return
 	}
 
 	sig = &Signature{
-		SigBytes:   make([]byte, wotsp256.SigLen),
+		SigBytes:   make([]byte, wotsp.SigLen),
 		PubSeed:    make([]byte, 32),
 		Message:    make([]byte, 32),
-		LeftHash:   make([]byte, 32),
-		RightHash:  make([]byte, 32),
-		ParentTxid: make([]byte, 32),
 	}
 
 	copy(sig.Message, msg)
 	copy(sig.SigBytes, sigBytes)
-	copy(sig.PubSeed, sigBytes[wotsp256.SigLen:])
-	copy(sig.ParentTxid, sigBytes[wotsp256.SigLen+32:])
-	sig.ParentInput = sigBytes[wotsp256.SigLen+64]
-	copy(sig.LeftHash, sigBytes[wotsp256.SigLen+65:])
-	copy(sig.RightHash, sigBytes[wotsp256.SigLen+97:])
+	copy(sig.PubSeed, sigBytes[wotsp.SigLen:])
+
+	childBytes := sigBytes[wotsp.SigLen+32:]
+	if len(childBytes) > 0 {
+		sig.ChildHashes = make([][]byte, len(childBytes) / 32)
+
+		for i := range sig.ChildHashes {
+			sig.ChildHashes[i] = make([]byte, 32)
+			copy(sig.ChildHashes[i], childBytes[i*32:])
+		}
+	}
 
 	return
 }
@@ -55,20 +55,26 @@ func (sig *Signature) PublicKey() ([]byte, error) {
 
 	s := sha256.New()
 	s.Write(sig.Message)
-	s.Write(sig.LeftHash)
-	s.Write(sig.RightHash)
 
-	return wotsp256.PkFromSig(sig.SigBytes, s.Sum(nil), sig.PubSeed, wotsp256.Address{}), nil
+	if sig.ChildHashes != nil {
+		for i := range sig.ChildHashes {
+			s.Write(sig.ChildHashes[i])
+		}
+	}
+
+	return wotsp.PkFromSig(sig.SigBytes, s.Sum(nil), sig.PubSeed, &wotsp.Address{}), nil
 }
 
 func (sig *Signature) Bytes() []byte {
 	buf := &bytes.Buffer{}
 	buf.Write(sig.SigBytes)
 	buf.Write(sig.PubSeed)
-	buf.Write(sig.ParentTxid)
-	buf.WriteByte(sig.ParentInput)
-	buf.Write(sig.LeftHash)
-	buf.Write(sig.RightHash)
+
+	if sig.ChildHashes != nil {
+		for i := range sig.ChildHashes {
+			buf.Write(sig.ChildHashes[i])
+		}
+	}
 
 	return buf.Bytes()
 }
