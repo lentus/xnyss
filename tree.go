@@ -22,9 +22,9 @@ var ConfirmsRequired uint8 = 1
 var Branches = 3
 
 var (
-	ErrInvalidMsgLen       = errors.New("invalid message length (must be 32 bytes)")
-	ErrTreeInvalidInput    = errors.New("invalid input, must contain at least a private and a public seed")
-	ErrTreeNoneAvailable   = errors.New("no signature nodes available")
+	ErrInvalidMsgLen     = errors.New("invalid message length (must be 32 bytes)")
+	ErrTreeInvalidInput  = errors.New("invalid input, must contain at least a private and a public seed")
+	ErrTreeNoneAvailable = errors.New("no signature nodes available")
 )
 
 type NYTree struct {
