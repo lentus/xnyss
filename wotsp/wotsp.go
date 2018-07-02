@@ -43,25 +43,26 @@ func base16(x []byte, outlen int) []uint8 {
 // Performs the chaining operation using an n-byte input and n-byte seed.
 // Assumes the input is the <start>-th element in the chain, and performs
 // <steps> iterations.
-func chain(h *hasher, in, out []byte, start, steps uint8, adrs *Address) {
-	copy(out, in)
+//
+// Scratch is used as a scratch pad: it is pre-allocated to precent every call
+// to chain from allocating slices for keys and bitmask. It is used as:
+// 		scratch = output || key || bitmask.
+func chain(h *hasher, in, scratch []byte, start, steps uint8, adrs *Address) {
+	copy(scratch, in)
 
-	key := make([]byte, 32)
-	bitmap := make([]byte, 32)
-
-	for i := start; i < start+steps && i < w; i++ {
+	for i := start; i < start+steps; i++ {
 		adrs.setHash(uint32(i))
 
 		adrs.setKeyAndMask(0)
-		h.prfPubSeed(adrs, key)
+		h.prfPubSeed(adrs, scratch[32:64])
 		adrs.setKeyAndMask(1)
-		h.prfPubSeed(adrs, bitmap)
+		h.prfPubSeed(adrs, scratch[64:])
 
 		for j := 0; j < n; j++ {
-			out[j] = out[j] ^ bitmap[j]
+			scratch[j] = scratch[j] ^ scratch[64+j]
 		}
 
-		h.hashF(key, out)
+		h.hashF(scratch[32:64], scratch[:32])
 	}
 }
 
@@ -85,9 +86,12 @@ func GenPublicKey(seed, pubSeed []byte, adrs *Address) []byte {
 	privKey := expandSeed(h)
 	pubKey := make([]byte, l*n)
 
+	// Allocate space for output, key and bit-mask of the chain function calls
+	scratch := make([]byte, 96)
 	for i := 0; i < l; i++ {
 		adrs.setChain(uint32(i))
-		chain(h, privKey[i*n:], pubKey[i*n:(i+1)*n],0, w-1, adrs)
+		chain(h, privKey[i*n:], scratch,0, w-1, adrs)
+		copy(pubKey[i*n:(i+1)*n], scratch)
 	}
 
 	return pubKey
@@ -119,11 +123,15 @@ func Sign(msg, seed, pubSeed []byte, adrs *Address) []byte {
 	csum := checksum(lengths)
 	lengths = append(lengths, csum...)
 
+	// Allocate space for output, key and bit-mask of the chain function calls
+	scratch := make([]byte, 96)
+
 	// Compute signature
 	sig := make([]byte, l*n)
 	for i := 0; i < l; i++ {
 		adrs.setChain(uint32(i))
-		chain(h, privKey[i*n:], sig[i*n:(i+1)*n], 0, lengths[i], adrs)
+		chain(h, privKey[i*n:], scratch, 0, lengths[i], adrs)
+		copy(sig[i*n:(i+1)*n], scratch)
 	}
 
 	return sig
@@ -139,11 +147,15 @@ func PkFromSig(sig, msg, pubSeed []byte, adrs *Address) []byte {
 	csum := checksum(lengths)
 	lengths = append(lengths, csum...)
 
+	// Allocate space for output, key and bit-mask of the chain function calls
+	scratch := make([]byte, 96)
+
 	// Compute public key
 	pubKey := make([]byte, l*n)
 	for i := 0; i < l; i++ {
 		adrs.setChain(uint32(i))
-		chain(h, sig[i*n:], pubKey[i*n:(i+1)*n], lengths[i], w-1-lengths[i], adrs)
+		chain(h, sig[i*n:], scratch, lengths[i], w-1-lengths[i], adrs)
+		copy(pubKey[i*n:(i+1)*n], scratch)
 	}
 
 	return pubKey
