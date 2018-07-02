@@ -3,7 +3,8 @@ package wotsp256
 import (
 	"reflect"
 	"hash"
-	"crypto/sha256"
+	//"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"encoding/binary"
 )
 
