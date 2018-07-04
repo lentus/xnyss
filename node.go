@@ -64,13 +64,6 @@ func (n *nyNode) genPubKey() []byte {
 	return wotsp.GenPublicKey(n.privSeed, n.pubSeed, &wotsp.Address{})
 }
 
-func genPubKeyHash(node *nyNode, c chan []byte) {
-	pubKey := node.genPubKey()
-	s := sha256.New()
-	s.Write(pubKey)
-	c <- s.Sum(nil)
-}
-
 func (n *nyNode) sign(msg, txid []byte, ots bool) (sig *Signature, childNodes []*nyNode, err error) {
 	childNodes, err = n.childNodes(txid)
 	if err != nil {
@@ -81,19 +74,22 @@ func (n *nyNode) sign(msg, txid []byte, ots bool) (sig *Signature, childNodes []
 
 	// Write message to be signed
 	s:= sha256.New()
-	s.Write(msg)
 
+	// Calculate the child nodes' public key hashes if required
 	if !ots {
-		// Calculate the child nodes' public keys concurrently
-		c := make(chan []byte)
 		for i := range childNodes {
-			go genPubKeyHash(childNodes[i], c)
+			pubKey := childNodes[i].genPubKey()
+
+			s.Write(pubKey)
+			childHashes[i] = s.Sum(nil)
+			s.Reset()
 		}
 
-		for i := range childNodes {
-			childHashes[i] = <-c
-			s.Write(childHashes[i])
-		}
+	}
+
+	s.Write(msg)
+	for i := range childNodes {
+		s.Write(childHashes[i])
 	}
 
 	sigBytes := wotsp.Sign(s.Sum(nil), n.privSeed, n.pubSeed, &wotsp.Address{})

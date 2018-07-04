@@ -68,27 +68,36 @@ func chain(h *hasher, routineNr int, in, out, scratch []byte, start, steps uint8
 	}
 }
 
+// Distributes the chains that must be computed between GOMAXPROCS goroutines.
+//
+// When fromSig is true, in contains a signature and out must be a public key;
+// in this case the routines must complete the signature chains so they use
+// lengths as start indices. If fromSig is false, we are either computing a
+// public key from a private key, or a signature from a private key, so the
+// routines use lengths as the amount of iterations to perform.
 func computeChains(h *hasher, numRoutines int, in, out []byte, lengths []uint8, adrs *Address, fromSig bool) {
 	chainsPerRoutine := (l-1)/numRoutines + 1
 
+	// Initialise scratch pad
 	scratch := make([]byte, numRoutines * 64)
 
 	wg := new(sync.WaitGroup)
 	for i := 0; i < numRoutines; i++ {
+		// Copy address structure
 		chainAdrs := new(Address)
 		copy(chainAdrs.data[:], adrs.data[:])
 
 		wg.Add(1)
 		go func(nr int, scratch []byte, adrs *Address) {
 			firstChain := nr * chainsPerRoutine
-
 			lastChain := firstChain + chainsPerRoutine - 1
+
+			// Make sure the last routine ends at the right chain
 			if lastChain >= l {
 				lastChain = l - 1
 			}
 
-			//fmt.Println(nr, "- first", firstChain, "\tlast", lastChain)
-
+			// Compute the hash chains
 			for j := firstChain; j <= lastChain; j++ {
 				adrs.setChain(uint32(j))
 				if fromSig {
