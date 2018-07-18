@@ -1,4 +1,5 @@
-// Implements the eXtended Naor-Yung Signature Scheme (XNYSS).
+// Implements the eXtended Naor-Yung Signature Scheme (XNYSS). Note that the
+// NYTree struct is not thread safe.
 package xnyss
 
 import (
@@ -25,6 +26,8 @@ var (
 	ErrInvalidMsgLen     = errors.New("invalid message length (must be 32 bytes)")
 	ErrTreeInvalidInput  = errors.New("invalid input, must contain at least a private and a public seed")
 	ErrTreeNoneAvailable = errors.New("no signature nodes available")
+	ErrTreeBackupOneTime = errors.New("cannot create a backup of a one-time tree")
+	ErrTreeBackupFailed  = errors.New("more backup nodes requested than are available")
 )
 
 type NYTree struct {
@@ -32,7 +35,6 @@ type NYTree struct {
 	rootSeed    []byte
 	rootPubSeed []byte
 	ots         bool
-	// TODO make thread safe by using a mutex
 }
 
 // Creates a new Naor-Yung chain tree using the given secret and public seeds.
@@ -133,7 +135,6 @@ func (t *NYTree) Sign(msg, txid []byte) (*Signature, error) {
 }
 
 // Returns a list of public key hashes of unconfirmed nodes present in the tree.
-// TODO make thread safe
 func (t *NYTree) Unconfirmed() (pkhashes [][]byte) {
 	idxs := make([]int, 0, len(t.nodes))
 	for idx, node := range t.nodes {
@@ -166,9 +167,6 @@ func (t *NYTree) Unconfirmed() (pkhashes [][]byte) {
 // acceptable tradeoff. An ameliorating factor is that when we are confirming a
 // batch of nodes, the performance of this function will improve after every
 // call since each time an additional node will be confirmed.
-//
-// TODO test whether confirming many nodes has reasonable performance
-// TODO make thread safe
 func (t *NYTree) Confirm(pkh []byte, confirms uint8) {
 	for _, node := range t.nodes {
 		if node.confirms >= ConfirmsRequired {
@@ -197,8 +195,51 @@ func (t *NYTree) Available(txid []byte) (n int) {
 	return
 }
 
+// Create a backup of the tree t by moving 'count' nodes of t to a new tree. A
+// backup can only be created if the original tree contains more than one node
+// that is available for signing (i.e. has at least ConfirmsRequired
+// confirmations).
+func (t *NYTree) Backup(count int) (*NYTree, error) {
+	if t.ots {
+		return nil, ErrTreeBackupOneTime
+	}
+
+	backup := &NYTree{
+		ots:         t.ots,
+		rootSeed:    make([]byte, 32),
+		rootPubSeed: make([]byte, 32),
+		nodes:       make([]*nyNode, 0, count),
+	}
+
+	// When not enough nodes are available, return a backup tree without nodes.
+	// This can be useful to make sure deterministic wallets using this backup
+	// correctly see no signatures are available, and do not create a new state
+	// including a root node (which might have already been used).
+	if count >= t.Available(nil) {
+		return backup, ErrTreeBackupFailed
+	}
+
+	copy(backup.rootSeed, t.rootSeed)
+	copy(backup.rootPubSeed, t.rootPubSeed)
+	// After removing a node from t.nodes, start from the beginning again to
+	// prevent issues with indexing.
+	for added := 0; added < count; added++ {
+		for i := range t.nodes {
+			if t.nodes[i].confirms >= ConfirmsRequired {
+				node := t.nodes[i]
+				// Remove node i from t's node list ...
+				t.nodes = append(t.nodes[:i], t.nodes[i+1:]...)
+				// ... and add it to the backup tree.
+				backup.nodes = append(backup.nodes, node)
+				break
+			}
+		}
+	}
+
+	return backup, nil
+}
+
 // Wipes secret data.
-// TODO make thread safe
 func (t *NYTree) Wipe() {
 	for _, node := range t.nodes {
 		node.wipe()
@@ -209,8 +250,7 @@ func (t *NYTree) Wipe() {
 	}
 }
 
-// Returns the byte representation of the tree t.
-// TODO make thread safe
+// Returns a byte representation of the tree t.
 func (t *NYTree) Bytes() []byte {
 	buf := &bytes.Buffer{}
 
@@ -230,7 +270,7 @@ func (t *NYTree) Bytes() []byte {
 	return buf.Bytes()
 }
 
-// Loads an existing Naor-Yung chain tree.
+// Loads an existing Naor-Yung chain tree from bytes.
 func Load(b []byte) (*NYTree, error) {
 	if len(b) < 65 {
 		return nil, ErrTreeInvalidInput
