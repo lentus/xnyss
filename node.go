@@ -42,16 +42,25 @@ func (n *nyNode) childNodes(txid []byte) (children []*nyNode, err error) {
 	if err != nil {
 		return
 	}
-	// TODO generate seeds by hashing n.*seed | randBytes
+
 	children = make([]*nyNode, Branches)
+	s := sha256.New()
 	offset := 0
 	for i := range children {
 		child := &nyNode{
 			txid:     txid,
-			privSeed: r[offset:offset+32],
-			pubSeed:  r[offset+32:offset+64],
 			confirms: 0,
 		}
+
+		s.Write(n.privSeed)
+		s.Write(r[offset : offset+32])
+		child.privSeed = s.Sum(nil)
+
+		s.Reset()
+
+		s.Write(n.pubSeed)
+		s.Write(r[offset+32 : offset+64])
+		child.pubSeed = s.Sum(nil)
 
 		children[i] = child
 		offset += 64
