@@ -8,5 +8,4 @@ the hashes of two public keys, to be used for future signatures, in every
 created signature. Thus every signature in the resulting binary tree can be 
 traced back to the first one.
 
-This implementation is part of my master's thesis, which will (hopefully) be 
-finished and made public in August of this year.
+This implementation is part of my master's thesis, which can be found [here](https://www.ru.nl/publish/pages/769526/wouter_van_der_linde.pdf).
